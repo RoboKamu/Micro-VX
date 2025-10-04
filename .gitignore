@@ -1,0 +1,21 @@
+# OS stuff
+.DS_Store
+
+# cubeIDE and kicad stuff 
+.idea/
+.metadata/
+.project
+.settings/
+*-backups/
+*.xml
+.cproject
+
+
+# build related 
+build/
+Debug/
+Release/
+*.o
+*.d
+*.exe
+

@@ -1,0 +1,5 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "New_Library")(type "KiCad")(uri "${KIPRJMOD}/LIS2DW12.pretty/New_Library.kicad_sym")(options "")(descr ""))
+  (lib (name "LIS2DW12")(type "KiCad")(uri "${KIPRJMOD}/LIS2DW12.pretty/LIS2DW12.kicad_sym")(options "")(descr ""))
+)

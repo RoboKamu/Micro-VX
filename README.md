@@ -10,7 +10,8 @@
 
 > This repository includes an extra project on the same board. The accelerometer visualization. That project was for expirementing with the module for future use. The main purpose for the board is for it to be used with the microphone, however a PCB error ment it had to be modified after assembly.
 >
-> Demo for expirimental Accelerometer Visualization: 
+
+> Demo for expirimental Accelerometer Visualization: ![Github Video Link](https://github.com/user-attachments/assets/0a82b6ed-7fab-43ed-bdb7-8c6c1341423e) 
 >
 > Demo for Audio Analyzer visualization: (WIP)
 

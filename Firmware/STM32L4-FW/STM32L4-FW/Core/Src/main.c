@@ -48,6 +48,7 @@
 #define VREFINT_CAL_ADDR                    ((uint16_t*) (0x1FFF75AAUL)) /* Internal voltage reference, address of parameter VREFINT_CAL: VrefInt ADC raw data acquired at temperature 30 DegC (tolerance: +-5 DegC), Vref+ = 3.0 V (tolerance: +-10 mV). */
 #define VREFINT_CAL_VALUE                   (*VREFINT_CAL_ADDR)         /* dereferenced to use in calculations */
 #define VDDA_CHARAC                         3000                        /* VDDA voltage characteristic from datasheet */
+#define BUFFER_LEN 							256 						/* total size of the dma buffer */
 
 /* USER CODE END PD */
 
@@ -58,6 +59,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+DMA_HandleTypeDef hdma_adc1;
 
 I2C_HandleTypeDef hi2c1;
 
@@ -70,14 +72,22 @@ LIS2DW12 acc;
 volatile uint8_t acc_data_ready = 0;
 
 volatile uint16_t vrefint_data = 0;
-volatile uint16_t mic_data = 0;
-volatile uint8_t adc_data_ready = 0;
+volatile int16_t mic_data = 0;
+
+volatile uint8_t wave_ready = 0;
+volatile uint8_t fft_ready = 0;
+
+static uint16_t samples[BUFFER_LEN];
+static uint16_t cached_buf[BUFFER_LEN];
+
+volatile GPIO_PinState state;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_TIM2_Init(void);
@@ -85,6 +95,9 @@ static void MX_TIM15_Init(void);
 /* USER CODE BEGIN PFP */
 static void oled_print(uint8_t x, uint8_t y, const SSD1306_Font_t Font,
 		SSD1306_COLOR color, const char *s, ...);
+static void run_audio_visualizer();
+static void run_fft_visualizer();
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -92,10 +105,10 @@ static void oled_print(uint8_t x, uint8_t y, const SSD1306_Font_t Font,
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
-	if (GPIO_Pin == ACC_INT_Pin) {
+	if (GPIO_Pin == SWITCH_EXTI_Pin) {
 
-		/* Accelerometer is ready, set data ready flag for superloop */
-		acc_data_ready = 1;
+		/* Update for new state */
+		state = HAL_GPIO_ReadPin(SWITCH_EXTI_GPIO_Port, SWITCH_EXTI_Pin);
 
 	}
 
@@ -105,16 +118,31 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
 	if (hadc->Instance == ADC1) {
 
-		/* Read mic ADC data */
-		mic_data = HAL_ADC_GetValue(hadc);
+//		for (uint8_t i = BUFFER_LEN/2; i < BUFFER_LEN; i++) {
+//			cached_buf[i] = samples[i];
+//		}
+		fft_ready = 1;
 
-		adc_data_ready = 1;
+//		wave_ready = 1;
 		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+
 
 	}
 
 }
 
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *hadc) {
+
+	if (hadc->Instance == ADC1) {
+
+//		for (uint8_t i = 0; i < BUFFER_LEN/2; i++) {
+//			cached_buf[i] = samples[i];
+//		}
+		wave_ready = 1;
+
+	}
+
+}
 
 /* USER CODE END 0 */
 
@@ -149,6 +177,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_I2C1_Init();
   MX_TIM2_Init();
@@ -164,11 +193,10 @@ int main(void)
 	if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
 		Error_Handler();
 
-	HAL_StatusTypeDef err = HAL_ADC_Start_IT(&hadc1);
-	if (err != HAL_OK)
+	if (HAL_ADC_Start_DMA(&hadc1, samples, BUFFER_LEN) != HAL_OK)
 		Error_Handler();
 
-	err = HAL_TIM_Base_Start_IT(&htim2);
+	HAL_StatusTypeDef err = HAL_TIM_Base_Start_IT(&htim2);
 	if (err != HAL_OK)
 		Error_Handler();
 
@@ -192,56 +220,9 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 	while (1) {
 
-    /* Acceleroemter code useless here */
-		if (acc_data_ready != 0) {
-			ssd1306_FillRectangle(0, 45, 127, 55, Black);
+		if (state == GPIO_PIN_SET) 	run_fft_visualizer();
+		else 						run_audio_visualizer();
 
-			/* read data */
-			LIS2DW12_ReadTemperature(&acc);
-			LIS2DW12_ReadAccelerations(&acc);
-
-			ssd1306_FillRectangle(90, 0, 127, 0, Black);
-
-			/* header of oled includes tempereature and battery */
-
-			oled_print(103, 0, Font_6x8, White, "%dC", (int16_t) acc.temp_C);
-
-			oled_print(0, 45, Font_7x10, White, "  %d     %d     %d",
-					(int16_t) acc.acc_mps2[0], (int16_t) acc.acc_mps2[1],
-					(int16_t) acc.acc_mps2[2]);
-
-			/* clear flag */
-			acc_data_ready = 0;
-		}
-
-//		if (HAL_GPIO_ReadPin(BOOT_SWITCH_GPIO_Port, BOOT_SWITCH_Pin) == GPIO_PIN_RESET) {
-//			HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-//		} else {
-//			HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
-//		}
-
-		if (adc_data_ready != 0) {
-
-			//HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-
-			oled_print(0, 0, Font_6x8, White, "ADC:  %u  ", mic_data);
-			adc_data_ready = 0;
-//
-//			uint16_t vdda = 0; /* VDDA in mV */
-//			if (vrefint_data != 0) {
-//				vdda = (VDDA_CHARAC * VREFINT_CAL_VALUE) / vrefint_data;
-//			}
-//
-//			/* print to dbg terminal */
-//			char buffer[20];
-//			snprintf(buffer, sizeof(buffer), "bat: %u.%01u\n\r", vdda / 1000,
-//					(vdda % 1000) / 100);
-//
-//			oled_print(0, 0, Font_6x8, White, "VDDA:%u.%01u", vdda / 1000,
-//					(vdda % 1000) / 100);
-
-			ssd1306_UpdateScreen();
-		}
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -332,7 +313,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T15_TRGO;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
   hadc1.Init.OversamplingMode = DISABLE;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
@@ -351,7 +332,7 @@ static void MX_ADC1_Init(void)
   sConfig.SamplingTime = ADC_SAMPLETIME_12CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
-  sConfig.Offset = 0;
+  sConfig.Offset = 2284;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -494,7 +475,7 @@ static void MX_TIM15_Init(void)
 
   /* USER CODE END TIM15_Init 1 */
   htim15.Instance = TIM15;
-  htim15.Init.Prescaler = 640-1;
+  htim15.Init.Prescaler = 1280-1;
   htim15.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim15.Init.Period = 1;
   htim15.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -518,6 +499,22 @@ static void MX_TIM15_Init(void)
   /* USER CODE BEGIN TIM15_Init 2 */
 
   /* USER CODE END TIM15_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
 }
 
@@ -554,15 +551,18 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : BOOT_SWITCH_Pin */
-  GPIO_InitStruct.Pin = BOOT_SWITCH_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  /*Configure GPIO pin : SWITCH_EXTI_Pin */
+  GPIO_InitStruct.Pin = SWITCH_EXTI_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(BOOT_SWITCH_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(SWITCH_EXTI_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -600,6 +600,44 @@ static void oled_print(uint8_t x, uint8_t y, const SSD1306_Font_t Font,
 
 	ssd1306_SetCursor(x, y);
 	ssd1306_WriteString(buffer, Font, color);
+
+}
+
+/**
+ * @breif audio analyzer, prints half of the dma buffer (128 samples) on oled
+ */
+static void run_audio_visualizer() {
+
+	if (!wave_ready) return;
+	wave_ready = 0;
+
+	ssd1306_Fill(Black);
+
+	for (uint8_t i = 0; i < BUFFER_LEN/2; i++) {
+
+		/* only display first half that is already converted */
+		uint8_t y = (uint8_t) (((64.0f)/4096.0f) * (samples[i]));
+//		if (y > 64) continue;
+		ssd1306_DrawPixel(i, y, White);
+
+	}
+
+	ssd1306_UpdateScreen();
+}
+
+/**
+ * @breif showing FFT visualizer on OLED
+ *
+ * ADC is 50 KHz and the dma buffer hold 256 samples.
+ * This gives FFT up to 25 K Hz, with little less than 200 Hz resolution between bins.
+ */
+static void run_fft_visualizer() {
+
+	if (!fft_ready) return;
+	fft_ready = 0;
+
+	ssd1306_Fill(Black);
+	ssd1306_UpdateScreen();
 
 }
 

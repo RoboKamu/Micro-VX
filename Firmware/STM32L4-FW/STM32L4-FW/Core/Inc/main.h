@@ -64,8 +64,9 @@ void Error_Handler(void);
 #define MIC_IN_GPIO_Port GPIOA
 #define LED_Pin GPIO_PIN_6
 #define LED_GPIO_Port GPIOB
-#define BOOT_SWITCH_Pin GPIO_PIN_3
-#define BOOT_SWITCH_GPIO_Port GPIOH
+#define SWITCH_EXTI_Pin GPIO_PIN_3
+#define SWITCH_EXTI_GPIO_Port GPIOH
+#define SWITCH_EXTI_EXTI_IRQn EXTI3_IRQn
 
 /* USER CODE BEGIN Private defines */
 

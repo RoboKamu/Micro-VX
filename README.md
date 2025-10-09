@@ -44,8 +44,8 @@ In the firmware folder you will see 2 projects:
 * **The STM32L4-LIS2DW12-Visual project in the STM32L4-Accelerometer-Visual folder:**
 Finished visualizer for the cheap accelerometer I added to the PCB. The program just shows the X, Y and Z axis as well as temperature. Another detail is to measure VDDA, this is very useful for sampling with ADC on battery powered devices. Ensuring accurate scaling. 
 
-* **STM32L4-FW (WIP):**
-The main project is this audio analyzer. Depending on the mechanical switch state it can either be showing continous audio wave or the FFT representation of it. Based on the VDDA measurement so the device works both on USB power and battery.  
+* **STM32L4-FW :**
+The main project is this audio analyzer. Depending on the mechanical switch state it can either be showing continous audio wave or the FFT representation of it. Includes TIMER2 peripheral for triggering ADC to sample microphone, DMA double buffering, and I2C protocol for OLED display. The MCU was programmed with a ST-LINK V2, developed in STM32cubeIDE with HAL, and used the ARM cmsis library for DSP applications. 
 
 ### 2. Hardware Architecture
 
@@ -55,9 +55,9 @@ The STM32L4 was chosen because it is from the low power series and also includes
 
 ### 3. Firmware Architecture
 
-#### 3.1 STM32L4-FW (WIP) 
-(WIP)
+#### 3.1 STM32L4-FW 
 
+The firmware is rather simple. Timer2 TRGO initiate a conversion with a sample rate of 50 kHz. The ADC uses 8x oversampling with 1 bit shift to compensate low gain on hardware. DMA double buffer is used so wave visualizer does not have to wait for the whole fft buffer fill up and instead waits for the halv-transfer-complete flag. The FFT uses the ARM CMSIS library and all visual functionality in this project is scaled to he OLED. 
 
 #### 3.2 STM32L4-LIS2DW12-Visual project 
 Timer 2 triggers ADC injected group conversion, the callback function then stores the raw ADC value to a variable and sets a data ready flag
@@ -67,13 +67,4 @@ Timer 15 triggers normal ADC conversion, the callback function then stores the r
 VDDA conversion just uses the last non zero value to calculate the voltage based on the formula from the datasheet. 
 
 For the accelerometer the Data-Ready interrupt pin is connected to EXTI pin on microcontroller, when state changes on the pin the microcontroller notes this with a flag to later use in the superloop. 
-
-
-TODO:
-- [x] Design and assemble PCB
-- [x] Write a simple driver for LIS2DW12 Accelerometer and display on oled
-- [x] Read real battery voltage level with VREF channel
-- [x] Read RAW ADC data on Microphone
-- [ ] Visualize audio wave
-- [ ] Visualize FFT of audio wave
 

@@ -29,6 +29,8 @@
 #include <string.h>         /* dbg include for uart print */
 #include <stdio.h>
 
+#include "arm_math.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -63,22 +65,21 @@ DMA_HandleTypeDef hdma_adc1;
 
 I2C_HandleTypeDef hi2c1;
 
-TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim15;
 
 /* USER CODE BEGIN PV */
 
-LIS2DW12 acc;
-volatile uint8_t acc_data_ready = 0;
-
-volatile uint16_t vrefint_data = 0;
-volatile int16_t mic_data = 0;
-
-volatile uint8_t wave_ready = 0;
-volatile uint8_t fft_ready = 0;
+volatile uint8_t dma_ftf_flag = 0;
+volatile uint8_t dma_htf_flag = 0;
 
 static uint16_t samples[BUFFER_LEN];
-static uint16_t cached_buf[BUFFER_LEN];
+
+#define N 				BUFFER_LEN					/* used for FFT array and looping */
+#define SAMPLE_RATE		50000.0f					/* effective sampling freq (64 Mhz / 640/2) */
+
+float fft_buf_in[N];
+float fft_buf_out[N];
+arm_rfft_fast_instance_f32 fft_handler;
 
 volatile GPIO_PinState state;
 
@@ -90,7 +91,6 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_I2C1_Init(void);
-static void MX_TIM2_Init(void);
 static void MX_TIM15_Init(void);
 /* USER CODE BEGIN PFP */
 static void oled_print(uint8_t x, uint8_t y, const SSD1306_Font_t Font,
@@ -118,14 +118,8 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
 	if (hadc->Instance == ADC1) {
 
-//		for (uint8_t i = BUFFER_LEN/2; i < BUFFER_LEN; i++) {
-//			cached_buf[i] = samples[i];
-//		}
-		fft_ready = 1;
-
-//		wave_ready = 1;
+		dma_ftf_flag = 1;
 		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-
 
 	}
 
@@ -135,10 +129,8 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *hadc) {
 
 	if (hadc->Instance == ADC1) {
 
-//		for (uint8_t i = 0; i < BUFFER_LEN/2; i++) {
-//			cached_buf[i] = samples[i];
-//		}
-		wave_ready = 1;
+		dma_htf_flag = 1;
+		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 
 	}
 
@@ -154,8 +146,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-	acc_data_ready = 0;
-	mic_data = 0;
 
   /* USER CODE END 1 */
 
@@ -180,11 +170,11 @@ int main(void)
   MX_DMA_Init();
   MX_ADC1_Init();
   MX_I2C1_Init();
-  MX_TIM2_Init();
   MX_TIM15_Init();
   /* USER CODE BEGIN 2 */
 
-	LIS2DW12_Init(&acc, &hi2c1);
+  /* initialize FFT */
+  arm_rfft_fast_init_f32(&fft_handler, N);
 
 	ssd1306_Init();
 
@@ -196,23 +186,11 @@ int main(void)
 	if (HAL_ADC_Start_DMA(&hadc1, samples, BUFFER_LEN) != HAL_OK)
 		Error_Handler();
 
-	HAL_StatusTypeDef err = HAL_TIM_Base_Start_IT(&htim2);
-	if (err != HAL_OK)
-		Error_Handler();
-
-	err = HAL_TIM_Base_Start_IT(&htim15);
-	if (err != HAL_OK)
+	if (HAL_TIM_Base_Start_IT(&htim15) != HAL_OK)
 		Error_Handler();
 
 	ssd1306_Fill(Black);
 	ssd1306_UpdateScreen();
-
-	ssd1306_SetCursor(0, 0);
-//	ssd1306_WriteString("[] 50%    m/s^2", Font_6x8, White);
-	ssd1306_WriteString("          m/s^2", Font_6x8, White);
-
-	ssd1306_SetCursor(5, 15);
-	ssd1306_WriteString(" X   Y   Z", Font_11x18, White);
 
   /* USER CODE END 2 */
 
@@ -220,8 +198,22 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 	while (1) {
 
-		if (state == GPIO_PIN_SET) 	run_fft_visualizer();
-		else 						run_audio_visualizer();
+		if (dma_htf_flag) {
+			dma_htf_flag = 0;
+			for (uint8_t i = 0; i < N/2; i++) {
+				fft_buf_in[i] = (float)samples[i];
+			}
+		}
+
+		if (dma_ftf_flag) {
+			dma_ftf_flag = 0;
+			for (uint16_t i = N/2; i < N; i++) {
+				fft_buf_in[i] = (float)samples[i];
+			}
+
+			if (state == GPIO_PIN_SET) 	run_fft_visualizer();
+			else 						run_audio_visualizer();
+		}
 
     /* USER CODE END WHILE */
 
@@ -293,7 +285,6 @@ static void MX_ADC1_Init(void)
   /* USER CODE END ADC1_Init 0 */
 
   ADC_ChannelConfTypeDef sConfig = {0};
-  ADC_InjectionConfTypeDef sConfigInjected = {0};
 
   /* USER CODE BEGIN ADC1_Init 1 */
 
@@ -302,7 +293,7 @@ static void MX_ADC1_Init(void)
   /** Common config
   */
   hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV2;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
@@ -315,15 +306,15 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
   hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
-  hadc1.Init.OversamplingMode = DISABLE;
+  hadc1.Init.OversamplingMode = ENABLE;
+  hadc1.Init.Oversampling.Ratio = ADC_OVERSAMPLING_RATIO_8;
+  hadc1.Init.Oversampling.RightBitShift = ADC_RIGHTBITSHIFT_1;
+  hadc1.Init.Oversampling.TriggeredMode = ADC_TRIGGEREDMODE_SINGLE_TRIGGER;
+  hadc1.Init.Oversampling.OversamplingStopReset = ADC_REGOVERSAMPLING_CONTINUED_MODE;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
     Error_Handler();
   }
-
-  /** Disable Injected Queue
-  */
-  HAL_ADCEx_DisableInjectedQueue(&hadc1);
 
   /** Configure Regular Channel
   */
@@ -334,26 +325,6 @@ static void MX_ADC1_Init(void)
   sConfig.OffsetNumber = ADC_OFFSET_NONE;
   sConfig.Offset = 2284;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Injected Channel
-  */
-  sConfigInjected.InjectedChannel = ADC_CHANNEL_VREFINT;
-  sConfigInjected.InjectedRank = ADC_INJECTED_RANK_1;
-  sConfigInjected.InjectedSamplingTime = ADC_SAMPLETIME_92CYCLES_5;
-  sConfigInjected.InjectedSingleDiff = ADC_SINGLE_ENDED;
-  sConfigInjected.InjectedOffsetNumber = ADC_OFFSET_NONE;
-  sConfigInjected.InjectedOffset = 0;
-  sConfigInjected.InjectedNbrOfConversion = 1;
-  sConfigInjected.InjectedDiscontinuousConvMode = DISABLE;
-  sConfigInjected.AutoInjectedConv = DISABLE;
-  sConfigInjected.QueueInjectedContext = DISABLE;
-  sConfigInjected.ExternalTrigInjecConv = ADC_EXTERNALTRIGINJEC_T2_TRGO;
-  sConfigInjected.ExternalTrigInjecConvEdge = ADC_EXTERNALTRIGINJECCONV_EDGE_RISING;
-  sConfigInjected.InjecOversamplingMode = DISABLE;
-  if (HAL_ADCEx_InjectedConfigChannel(&hadc1, &sConfigInjected) != HAL_OK)
   {
     Error_Handler();
   }
@@ -379,7 +350,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.Timing = 0x10B17DB5;
+  hi2c1.Init.Timing = 0x20B5546F;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_ENABLE;
@@ -412,51 +383,6 @@ static void MX_I2C1_Init(void)
 }
 
 /**
-  * @brief TIM2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM2_Init(void)
-{
-
-  /* USER CODE BEGIN TIM2_Init 0 */
-
-  /* USER CODE END TIM2_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM2_Init 1 */
-
-  /* USER CODE END TIM2_Init 1 */
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 64000;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 1000;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM2_Init 2 */
-
-  /* USER CODE END TIM2_Init 2 */
-
-}
-
-/**
   * @brief TIM15 Initialization Function
   * @param None
   * @retval None
@@ -475,9 +401,9 @@ static void MX_TIM15_Init(void)
 
   /* USER CODE END TIM15_Init 1 */
   htim15.Instance = TIM15;
-  htim15.Init.Prescaler = 1280-1;
+  htim15.Init.Prescaler = 640-1;
   htim15.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim15.Init.Period = 1;
+  htim15.Init.Period = 2-1;
   htim15.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim15.Init.RepetitionCounter = 0;
   htim15.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -538,12 +464,6 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : ACC_INT_Pin */
-  GPIO_InitStruct.Pin = ACC_INT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(ACC_INT_GPIO_Port, &GPIO_InitStruct);
-
   /*Configure GPIO pin : LED_Pin */
   GPIO_InitStruct.Pin = LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -558,9 +478,6 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(SWITCH_EXTI_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
-
   HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
@@ -604,22 +521,29 @@ static void oled_print(uint8_t x, uint8_t y, const SSD1306_Font_t Font,
 }
 
 /**
- * @breif audio analyzer, prints half of the dma buffer (128 samples) on oled
+ * audio analyzer, prints half of the dma buffer (128 samples) on oled
+ * Can use relative scaling for better display if values are above threshold
  */
 static void run_audio_visualizer() {
 
-	if (!wave_ready) return;
-	wave_ready = 0;
-
 	ssd1306_Fill(Black);
 
+	float sum = 0.0f, max=1.0f;
 	for (uint8_t i = 0; i < BUFFER_LEN/2; i++) {
+		if (fft_buf_in[i] > max) max = fft_buf_in[i];
+		sum += fft_buf_in[i];
+	}
 
+	float mean = sum/((float)BUFFER_LEN/2);
+	const int threshold = 7;
+	float scale = (max-mean) > threshold ? (15.0f)/(max-mean) : 15.0f / 2048.0f;
+
+	for (uint8_t i = 0; i < BUFFER_LEN/2; i++) {
 		/* only display first half that is already converted */
-		uint8_t y = (uint8_t) (((64.0f)/4096.0f) * (samples[i]));
-//		if (y > 64) continue;
-		ssd1306_DrawPixel(i, y, White);
-
+		float y = 31 - (fft_buf_in[i]-mean) * scale;
+		if (y >= 64) y=63;
+		if (y < 0) y = 0;
+		ssd1306_DrawPixel(i, (uint8_t)(y+0.5), White);
 	}
 
 	ssd1306_UpdateScreen();
@@ -628,17 +552,57 @@ static void run_audio_visualizer() {
 /**
  * @breif showing FFT visualizer on OLED
  *
- * ADC is 50 KHz and the dma buffer hold 256 samples.
- * This gives FFT up to 25 K Hz, with little less than 200 Hz resolution between bins.
  */
 static void run_fft_visualizer() {
 
-	if (!fft_ready) return;
-	fft_ready = 0;
-
 	ssd1306_Fill(Black);
-	ssd1306_UpdateScreen();
 
+	float sum = 0;
+	for (uint16_t i = 0; i < N; i++) sum += fft_buf_in[i];
+	float mean = (float)sum/(float)N;
+
+	for (uint16_t i = 0; i < N; i++) {
+		float hann = 0.5 * (1 - cos(2*PI*i/(N-1))); /* hann window multiplier */
+		float val = (float)fft_buf_in[i] - mean;
+		fft_buf_in[i] = hann * val;
+	}
+
+	arm_rfft_fast_f32(&fft_handler, fft_buf_in, fft_buf_out, 0);
+
+	float max = 1.0f;
+	float mags[N/2];
+	uint8_t bin_index = 0; /* keep track of the index for fft bin number */
+
+	for (uint16_t i = 0; i < N; i+=2) {
+		/* calculate the magnitude of the bin */
+		float x = fft_buf_out[i];
+		float y = fft_buf_out[i+1];
+		mags[bin_index] = sqrtf(x*x + y*y);
+
+		if (max < mags[bin_index]) {
+			max = mags[bin_index];
+//			peakHz = (uint16_t) ((float)bin_index * SAMPLE_RATE / ((float)N));
+		}
+
+		bin_index++;
+	}
+
+	/* display the transform */
+	for (uint8_t i = 0; i < N/2; i++) {
+		float mag = mags[i];
+		if (mag < 100) mag = 0;
+		/* scale magnitude to oled, default divisor = 1 / (64 / (128*2048)) */
+		mag = mag / max;
+		mag = mag * 63.0;
+		mag = mag >= 64.0 ? 63 : mag;
+		mag = mag < 0 ? 0 : mag;
+		ssd1306_DrawPixel(i, 63-(uint8_t)mag, White);
+
+	}
+
+//	oled_print(0, 32, Font_7x10, White, "freq= %u", peakHz);
+
+	ssd1306_UpdateScreen();
 }
 
 /* USER CODE END 4 */

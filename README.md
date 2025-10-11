@@ -11,7 +11,7 @@
 
 > Demo for expirimental Accelerometer Visualization: ![Github Video Link](https://github.com/user-attachments/assets/0a82b6ed-7fab-43ed-bdb7-8c6c1341423e) 
 >
-> Demo for Audio Analyzer visualization: ![Youtube Video Link](https://www.youtube.com/watch?v=JHZs5dUxs48)
+> Demo for FFT and Auido Wave Visualization: [Youtube Video Link](https://www.youtube.com/watch?v=JHZs5dUxs48)
 
 
 <p align="center">

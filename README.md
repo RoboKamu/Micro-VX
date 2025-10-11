@@ -1,7 +1,7 @@
 <h1 align="center"> Micro-VX: Mini Audio Visualizer </h1>
 
 <div align="center">
-<i> Small portable STM32L4 based audio analyzer that visualizes live waveform and FFT data from MEMS microphone. This project started as an experiment to design my first PCB and explore the STM32L4 low-power MCU family. </i>
+<i> Small portable STM32L4 based audio wave and FFT visualizer from MEMS microphone. This project started as an experiment to design my first PCB and explore the STM32L4 low-power MCU family. </i>
 </div>
 
 ---

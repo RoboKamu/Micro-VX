@@ -6,7 +6,7 @@
 	(paper "A4")
 	(title_block
 		(title "Micro-VX STM32 PCB")
-		(date "2025-06-28")
+		(date "2025-10-11")
 		(rev "0.1")
 		(company "Karzan M.")
 	)

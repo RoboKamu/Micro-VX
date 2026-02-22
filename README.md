@@ -1,7 +1,7 @@
 <h1 align="center"> Micro-VX: Mini Audio Visualizer </h1>
 
 <div align="center">
-<i> Small portable STM32L4 based audio wave and FFT visualizer from MEMS microphone. This project started as an experiment to design my first PCB and explore the STM32L4 low-power MCU family. </i>
+<i> Small portable STM32L4 based audio wave and FFT visualizer from electret microphone. This project started as an experiment to design my first PCB and explore the STM32L4 low-power MCU family. </i>
 </div>
 
 ---
@@ -33,7 +33,7 @@ There are 2 versions of the PCB, with one being modified after assembly.
 Original PCB according to the schematic. Utilizing the Accelerometer (3-axis LIS2DW12) and I2C pin headers for OLED display (SSD1306).
 
 * **Audio analyzer:**
-Modified after assembly (refer to hardware folder). The PCB used for the audio analysis with MEMS microphone (B4013AM423-093). Also utilizes the I2C pin headers for OLED display (SSD1306) and a mechanical switch to change program state. 
+Modified after assembly (refer to hardware folder). The PCB used for the audio analysis with electret microphone (B4013AM423-093). Also utilizes the I2C pin headers for OLED display (SSD1306) and a mechanical switch to change program state. 
 
 #### 1.2 Firmware
 

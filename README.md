@@ -69,3 +69,9 @@ VDDA conversion just uses the last non zero value to calculate the voltage based
 
 For the accelerometer the Data-Ready interrupt pin is connected to EXTI pin on microcontroller, when state changes on the pin the microcontroller notes this with a flag to later use in the superloop. 
 
+### 4. Future improvements
+This project was more of a practise so no real futher improvements are scheduled. One critical mistake that was overlooked was the usage of the microphone. The schematic PDF in the hardware folder shows no usage of preamp stage, this led to a bad resolution being sampled. For the PCB routing there are also obvious improvements to be made, but that will not be noted here. Below is an example of a improved schematic. The microphone preamp stage was validated via LTSpice simulation.
+
+[revised-sch.pdf](https://github.com/user-attachments/files/25467140/revised-sch.pdf)
+
+<img width="2339" height="1654" alt="revised-sch" src="https://github.com/user-attachments/assets/cc597a31-d5ee-4683-a9ca-3c8e121f9009" />
